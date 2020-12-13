@@ -1,0 +1,66 @@
+name: Renew Certificates
+on:
+  schedule:
+    - cron: 0 0 1,15 * *
+  workflow_dispatch:
+    inputs:
+      params:
+        description: parameters for acme.sh execute
+        required: false
+      manual:
+        description: use manual mode or not
+        required: false
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - id: params
+        run: |
+          if [[ -z "${{ github.event.inputs.manual }}" ]]; then
+            echo "::set-output name=repo::certificates"
+          else
+            echo "::set-output name=repo::certificates-manual"
+          fi
+      - uses: actions/checkout@v2
+        with:
+          repository: chentanyi/${{ steps.params.outputs.repo }}
+          path: certificates
+          token: ${{ secrets.TOKEN }}
+      - uses: actions/checkout@v2
+        with:
+          repository: acmesh-official/acme.sh
+          path: acme.sh
+      - uses: actions/checkout@v2
+        with:
+          repository: chentanyi/acme.sh-dns
+          path: acme.sh-dns
+      - uses: actions/setup-python@v2
+      - name: Prepare
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "Github Actions"
+
+          cp -r acme.sh-dns/* acme.sh/
+          chmod +x acme.sh/acme.sh
+          pip3 install bs4 requests
+      - name: run acme.sh
+        run: |
+          if [[ -z "${{ github.event.inputs.params }}" ]]; then
+            ./acme.sh/acme.sh $PARAMS --renew-all
+          elif [[ -z "${{ github.event.inputs.manual }}" ]]; then
+            ./acme.sh/acme.sh $PARAMS ${{ github.event.inputs.params }}
+          else
+            ./acme.sh/acme.sh --yes-I-know-dns-manual-mode-enough-go-ahead-please $PARAMS ${{ github.event.inputs.params }}
+          fi
+        env:
+          PARAMS: --home ./acme.sh --config-home ./certificates
+          FREENOM_USERNAME: ${{ secrets.FREENOM_USERNAME }}
+          FREENOM_PASSWORD: ${{ secrets.FREENOM_PASSWORD }}
+      - name: Push
+        working-directory: certificates
+        run: |
+          {
+            git add .
+            git commit -m '[Automation] Renew Certificates'
+            git push
+          } || true
